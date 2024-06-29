@@ -20,18 +20,24 @@ if (!
     exit
 }
 
+function Test-ReparsePoint([string]$path) {
+    $file = Get-Item $path -Force -ea SilentlyContinue
+    return [bool]($file.Attributes -band [IO.FileAttributes]::ReparsePoint)
+}
+
 $selection = "$args"
 if (Test-Path -LiteralPath "${selection}\.minecraft") { Set-Location -LiteralPath "${selection}\.minecraft" }
 elseif (Test-Path -LiteralPath "${selection}\minecraft") { Set-Location -LiteralPath "${selection}\minecraft" }
 else {
-    Write-Output ".minecraft doesnt exist inside instance"
+    Write-Host ".minecraft doesnt exist inside instance"
     exit
 }
+
 ${curdir} = Get-Location
 ${appdatamc} = "${env:APPDATA}\.minecraft"
 ${folders} = "screenshots", "resourcepacks", "saves", "schematics", "shaderpacks", "texturepacks"
 
-Write-Output "Created symlinks for:"
+Write-Host "Created symlinks for:"
 foreach (${folder} in ${folders}) {
     $instancefolder = "${curdir}\${folder}"
     $appdatafolder = "${appdatamc}\${folder}"
@@ -44,10 +50,15 @@ foreach (${folder} in ${folders}) {
         New-Item -ItemType Directory "${appdatafolder}"
     }
 
-    # Copy existing files to appdata folder and remove the instance folder, then create a symlink
-    Copy-Item "${instancefolder}\*" -Destination "${appdatafolder}\" -Recurse
-    Remove-Item "${instancefolder}" -Recurse -Force
-    New-Item -ItemType SymbolicLink "${folder}" -Target "${appdatafolder}" -Force
+    if (Test-ReparsePoint "${instancefolder}") {
+        Write-Host "(SKIPPED) (Already a symlink): ${folder}"
+    }
+    else {
+        # Copy existing files to appdata folder and remove the instance folder, then create a symlink
+        Copy-Item "${instancefolder}\*" -Destination "${appdatafolder}\" -Recurse
+        Remove-Item "${instancefolder}" -Recurse -Force
+        New-Item -ItemType SymbolicLink "${folder}" -Target "${appdatafolder}" -Force
+    }
 }
 
 # Create if doesn't exist
@@ -58,12 +69,15 @@ if (!(Test-Path -LiteralPath "${appdatamc}\servers.dat")) {
     New-Item -ItemType File "${appdatamc}\servers.dat"
 }
 
-# Rename servers.dat to old_currdate
-$DateStr = Get-Date -Format "yyyy-MM-dd-hh-mm-ss"
-Rename-Item "servers.dat" "servers.dat_old.${DateStr}"
-
-# Link servers.dat to appdata one
-if (!(Test-Path -LiteralPath "servers.dat")) {
-    New-Item -ItemType SymbolicLink "servers.dat" -Target "${appdatamc}\servers.dat"
+# Check if servers.dat is already a symlink
+if (Test-ReparsePoint "${curdir}\servers.dat") {
+    Write-Host "(SKIPPED) (Already a symlink): servers.dat"
 }
-pause
+else {
+    # Rename servers.dat to old_currdate and create symlink
+    $DateStr = Get-Date -Format "yyyy-MM-dd-hh-mm-ss"
+    Rename-Item "servers.dat" "servers.dat_old.${DateStr}"
+    if (!(Test-Path -LiteralPath "${curdir}\servers.dat")) {
+        New-Item -ItemType SymbolicLink "${curdir}\servers.dat" -Target "${appdatamc}\servers.dat"
+    }
+}
